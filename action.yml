@@ -1,0 +1,121 @@
+name: 'Busbar — sf-snapshot-create'
+description: 'Create a Salesforce scratch-org snapshot (OrgSnapshot) via direct API. Auths the DevHub via busbar-auth.'
+author: 'Busbar'
+
+inputs:
+  name:
+    description: 'Snapshot name (unique within the DevHub).'
+    required: true
+  source-org:
+    description: '15- or 18-char id of the source scratch org (the `ScratchOrg` field from sf-org-create output).'
+    required: true
+  description:
+    description: 'Optional description.'
+    required: false
+    default: ''
+  content:
+    description: 'Optional content selector (usually `metadatadata`).'
+    required: false
+    default: ''
+  poll-timeout-secs:
+    description: 'Seconds to wait for the snapshot to reach Active (can take 30+ min for large orgs).'
+    required: false
+    default: '3600'
+  result-output:
+    description: 'Path to write the snapshot result JSON.'
+    required: false
+    default: '.busbar/snapshot-result.json'
+  version:
+    description: 'Release tag of the sf-snapshot-create binary.'
+    required: false
+    default: 'latest'
+  binary-repo:
+    description: 'GitHub repo hosting prebuilt binary releases.'
+    required: false
+    default: 'busbar-actions/actions-dist'
+
+outputs:
+  snapshot-id:
+    description: 'OrgSnapshot record id (pass to sf-org-delete --snapshot-id when retiring).'
+    value: ${{ steps.snap.outputs.snapshot-id }}
+  status:
+    description: 'Final status (Active on success).'
+    value: ${{ steps.snap.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve release tag
+      id: tag
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${{ inputs.version }}" == "latest" ]]; then
+          tag=$(gh release view --repo "${{ inputs.binary-repo }}" --json tagName -q .tagName)
+        else
+          tag="${{ inputs.version }}"
+        fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Resolve binary asset name
+      id: asset
+      shell: bash
+      run: |
+        case "${{ runner.os }}-${{ runner.arch }}" in
+          Linux-X64)   name="sf-snapshot-create-x86_64-unknown-linux-gnu" ;;
+          Linux-ARM64) name="sf-snapshot-create-aarch64-unknown-linux-gnu" ;;
+          macOS-X64)   name="sf-snapshot-create-x86_64-apple-darwin" ;;
+          macOS-ARM64) name="sf-snapshot-create-aarch64-apple-darwin" ;;
+          Windows-X64) name="sf-snapshot-create-x86_64-pc-windows-msvc.exe" ;;
+          *) echo "Unsupported runner: ${{ runner.os }}-${{ runner.arch }}" >&2; exit 1 ;;
+        esac
+        echo "name=$name" >> "$GITHUB_OUTPUT"
+
+    - name: Download sf-snapshot-create binary
+      shell: bash
+      run: |
+        set -euo pipefail
+        bin_dir="${RUNNER_TEMP}/sf-snapshot-create"
+        mkdir -p "$bin_dir"
+        gh release download "${{ steps.tag.outputs.tag }}" \
+          --repo "${{ inputs.binary-repo }}" \
+          --pattern "${{ steps.asset.outputs.name }}" \
+          --dir "$bin_dir"
+        bin_path="$bin_dir/${{ steps.asset.outputs.name }}"
+        chmod +x "$bin_path"
+        echo "$bin_dir" >> "$GITHUB_PATH"
+        if [[ "$bin_path" != "$bin_dir/sf-snapshot-create" && "$bin_path" != "$bin_dir/sf-snapshot-create.exe" ]]; then
+          ext=""
+          [[ "${{ runner.os }}" == "Windows" ]] && ext=".exe"
+          ln -sf "$bin_path" "$bin_dir/sf-snapshot-create$ext"
+        fi
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Create snapshot
+      id: snap
+      shell: bash
+      env:
+        SF_ACCESS_TOKEN: ${{ env.SF_ACCESS_TOKEN }}
+        SF_INSTANCE_URL: ${{ env.SF_INSTANCE_URL }}
+        BUSBAR_ECA_CLIENT_ID: ${{ env.BUSBAR_ECA_CLIENT_ID }}
+        BUSBAR_TOKEN_HANDLER: ${{ env.BUSBAR_TOKEN_HANDLER }}
+        BUSBAR_OIDC_AUDIENCE: ${{ env.BUSBAR_OIDC_AUDIENCE }}
+        ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+      run: |
+        set -euo pipefail
+        args=(--name "${{ inputs.name }}"
+              --source-org "${{ inputs.source-org }}"
+              --poll-timeout-secs "${{ inputs.poll-timeout-secs }}"
+              --output "${{ inputs.result-output }}")
+        [[ -n "${{ inputs.description }}" ]] && args+=(--description "${{ inputs.description }}")
+        [[ -n "${{ inputs.content }}" ]] && args+=(--content "${{ inputs.content }}")
+
+        mkdir -p "$(dirname "${{ inputs.result-output }}")"
+        sf-snapshot-create "${args[@]}"
+
+        jq -r '"snapshot-id=" + .org_snapshot_id' "${{ inputs.result-output }}" >> "$GITHUB_OUTPUT"
+        jq -r '"status=" + .status'               "${{ inputs.result-output }}" >> "$GITHUB_OUTPUT"
