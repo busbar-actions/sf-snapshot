@@ -1,4 +1,4 @@
-# busbar-actions/sf-snapshot-create
+# busbar-actions/sf-snapshot
 
 Create a Salesforce scratch-org snapshot (`OrgSnapshot`) on the DevHub. The companion to `sf-org-create --snapshot <name>` for the **golden-snapshot pattern**: build a snapshot once (with `busbar-broker-sf` + trust CMDT preinstalled), then create scratch orgs from it for every CI run.
 
@@ -19,7 +19,7 @@ Create a Salesforce scratch-org snapshot (`OrgSnapshot`) on the DevHub. The comp
 | `content` | `` | Optional content selector (usually `metadatadata`). |
 | `poll-timeout-secs` | `3600` | Snapshots can take 30+ minutes for large orgs. |
 | `result-output` | `.busbar/snapshot-result.json` | Where to write the snapshot result JSON. |
-| `version` | `latest` | `sf-snapshot-create` release tag. |
+| `version` | `latest` | `sf-snapshot` release tag. |
 | `binary-repo` | `busbar-actions/actions-dist` | Where to fetch the binary. |
 
 ## Outputs
@@ -62,7 +62,7 @@ jobs:
           export SF_INSTANCE_URL=$(jq -r .credentials.instance_url "${{ steps.org.outputs.credentials-path }}")
           # … install broker package, deploy trust rules …
 
-      - uses: busbar-actions/sf-snapshot-create@v1
+      - uses: busbar-actions/sf-snapshot@v1
         with:
           name: golden-busbar
           source-org: ${{ steps.org.outputs.scratch-org-id }}

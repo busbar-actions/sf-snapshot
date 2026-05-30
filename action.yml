@@ -1,4 +1,4 @@
-name: 'Busbar — sf-snapshot-create'
+name: 'Busbar — sf-snapshot'
 description: 'Create a Salesforce scratch-org snapshot (OrgSnapshot) via direct API. Auths the DevHub via busbar-auth.'
 author: 'Busbar'
 
@@ -26,7 +26,7 @@ inputs:
     required: false
     default: '.busbar/snapshot-result.json'
   version:
-    description: 'Release tag of the sf-snapshot-create binary.'
+    description: 'Release tag of the sf-snapshot binary.'
     required: false
     default: 'latest'
   binary-repo:
@@ -64,20 +64,20 @@ runs:
       shell: bash
       run: |
         case "${{ runner.os }}-${{ runner.arch }}" in
-          Linux-X64)   name="sf-snapshot-create-x86_64-unknown-linux-gnu" ;;
-          Linux-ARM64) name="sf-snapshot-create-aarch64-unknown-linux-gnu" ;;
-          macOS-X64)   name="sf-snapshot-create-x86_64-apple-darwin" ;;
-          macOS-ARM64) name="sf-snapshot-create-aarch64-apple-darwin" ;;
-          Windows-X64) name="sf-snapshot-create-x86_64-pc-windows-msvc.exe" ;;
+          Linux-X64)   name="sf-snapshot-x86_64-unknown-linux-gnu" ;;
+          Linux-ARM64) name="sf-snapshot-aarch64-unknown-linux-gnu" ;;
+          macOS-X64)   name="sf-snapshot-x86_64-apple-darwin" ;;
+          macOS-ARM64) name="sf-snapshot-aarch64-apple-darwin" ;;
+          Windows-X64) name="sf-snapshot-x86_64-pc-windows-msvc.exe" ;;
           *) echo "Unsupported runner: ${{ runner.os }}-${{ runner.arch }}" >&2; exit 1 ;;
         esac
         echo "name=$name" >> "$GITHUB_OUTPUT"
 
-    - name: Download sf-snapshot-create binary
+    - name: Download sf-snapshot binary
       shell: bash
       run: |
         set -euo pipefail
-        bin_dir="${RUNNER_TEMP}/sf-snapshot-create"
+        bin_dir="${RUNNER_TEMP}/sf-snapshot"
         mkdir -p "$bin_dir"
         gh release download "${{ steps.tag.outputs.tag }}" \
           --repo "${{ inputs.binary-repo }}" \
@@ -86,10 +86,10 @@ runs:
         bin_path="$bin_dir/${{ steps.asset.outputs.name }}"
         chmod +x "$bin_path"
         echo "$bin_dir" >> "$GITHUB_PATH"
-        if [[ "$bin_path" != "$bin_dir/sf-snapshot-create" && "$bin_path" != "$bin_dir/sf-snapshot-create.exe" ]]; then
+        if [[ "$bin_path" != "$bin_dir/sf-snapshot" && "$bin_path" != "$bin_dir/sf-snapshot.exe" ]]; then
           ext=""
           [[ "${{ runner.os }}" == "Windows" ]] && ext=".exe"
-          ln -sf "$bin_path" "$bin_dir/sf-snapshot-create$ext"
+          ln -sf "$bin_path" "$bin_dir/sf-snapshot$ext"
         fi
       env:
         GH_TOKEN: ${{ github.token }}
@@ -115,7 +115,7 @@ runs:
         [[ -n "${{ inputs.content }}" ]] && args+=(--content "${{ inputs.content }}")
 
         mkdir -p "$(dirname "${{ inputs.result-output }}")"
-        sf-snapshot-create "${args[@]}"
+        sf-snapshot "${args[@]}"
 
         jq -r '"snapshot-id=" + .org_snapshot_id' "${{ inputs.result-output }}" >> "$GITHUB_OUTPUT"
         jq -r '"status=" + .status'               "${{ inputs.result-output }}" >> "$GITHUB_OUTPUT"
