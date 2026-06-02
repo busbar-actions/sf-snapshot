@@ -37,67 +37,47 @@ inputs:
 outputs:
   snapshot-id:
     description: 'OrgSnapshot record id (pass to sf-org-delete --snapshot-id when retiring).'
-    value: ${{ steps.snap.outputs.snapshot-id }}
+    value: ${{ steps.snap.outputs.org_snapshot_id }}
   status:
     description: 'Final status (Active on success).'
     value: ${{ steps.snap.outputs.status }}
+  snapshot-name:
+    description: 'Canonical snapshot name.'
+    value: ${{ steps.snap.outputs.snapshot_name }}
+  rotated:
+    description: '"true" when zero-downtime rotation was used.'
+    value: ${{ steps.snap.outputs.rotated }}
+  expiration-date:
+    description: 'Snapshot expiration date when provided by Salesforce.'
+    value: ${{ steps.snap.outputs.expiration_date }}
+  result-path:
+    description: 'Path to the JSON file containing the snapshot result.'
+    value: ${{ inputs.result-output }}
 
+# The binary owns all logic and UX: it reads its inputs from INPUT_*, runs the
+# zero-downtime snapshot rotation, writes the JSON result, GITHUB_OUTPUT, the
+# step summary and an annotation. This action only installs it and passes inputs
+# (plus the SF/OIDC auth env) through.
 runs:
   using: 'composite'
   steps:
-    - name: Resolve release tag
-      id: tag
-      shell: bash
-      run: |
-        set -euo pipefail
-        if [[ "${{ inputs.version }}" == "latest" ]]; then
-          tag=$(gh release view --repo "${{ inputs.binary-repo }}" --json tagName -q .tagName)
-        else
-          tag="${{ inputs.version }}"
-        fi
-        echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      env:
-        GH_TOKEN: ${{ github.token }}
-
-    - name: Resolve binary asset name
-      id: asset
-      shell: bash
-      run: |
-        case "${{ runner.os }}-${{ runner.arch }}" in
-          Linux-X64)   name="sf-snapshot-x86_64-unknown-linux-gnu" ;;
-          Linux-ARM64) name="sf-snapshot-aarch64-unknown-linux-gnu" ;;
-          macOS-X64)   name="sf-snapshot-x86_64-apple-darwin" ;;
-          macOS-ARM64) name="sf-snapshot-aarch64-apple-darwin" ;;
-          Windows-X64) name="sf-snapshot-x86_64-pc-windows-msvc.exe" ;;
-          *) echo "Unsupported runner: ${{ runner.os }}-${{ runner.arch }}" >&2; exit 1 ;;
-        esac
-        echo "name=$name" >> "$GITHUB_OUTPUT"
-
-    - name: Download sf-snapshot binary
-      shell: bash
-      run: |
-        set -euo pipefail
-        bin_dir="${RUNNER_TEMP}/sf-snapshot"
-        mkdir -p "$bin_dir"
-        gh release download "${{ steps.tag.outputs.tag }}" \
-          --repo "${{ inputs.binary-repo }}" \
-          --pattern "${{ steps.asset.outputs.name }}" \
-          --dir "$bin_dir"
-        bin_path="$bin_dir/${{ steps.asset.outputs.name }}"
-        chmod +x "$bin_path"
-        echo "$bin_dir" >> "$GITHUB_PATH"
-        if [[ "$bin_path" != "$bin_dir/sf-snapshot" && "$bin_path" != "$bin_dir/sf-snapshot.exe" ]]; then
-          ext=""
-          [[ "${{ runner.os }}" == "Windows" ]] && ext=".exe"
-          ln -sf "$bin_path" "$bin_dir/sf-snapshot$ext"
-        fi
-      env:
-        GH_TOKEN: ${{ github.token }}
+    - name: Set up sf-snapshot
+      uses: busbar-actions/setup@main
+      with:
+        binary: sf-snapshot
+        version: ${{ inputs.version }}
+        binary-repo: ${{ inputs.binary-repo }}
 
     - name: Create snapshot
       id: snap
       shell: bash
       env:
+        INPUT_NAME: ${{ inputs.name }}
+        INPUT_SOURCE_ORG: ${{ inputs.source-org }}
+        INPUT_DESCRIPTION: ${{ inputs.description }}
+        INPUT_CONTENT: ${{ inputs.content }}
+        INPUT_POLL_TIMEOUT_SECS: ${{ inputs.poll-timeout-secs }}
+        INPUT_RESULT_OUTPUT: ${{ inputs.result-output }}
         SF_ACCESS_TOKEN: ${{ env.SF_ACCESS_TOKEN }}
         SF_INSTANCE_URL: ${{ env.SF_INSTANCE_URL }}
         BUSBAR_ECA_CLIENT_ID: ${{ env.BUSBAR_ECA_CLIENT_ID }}
@@ -105,17 +85,4 @@ runs:
         BUSBAR_OIDC_AUDIENCE: ${{ env.BUSBAR_OIDC_AUDIENCE }}
         ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
         ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-      run: |
-        set -euo pipefail
-        args=(--name "${{ inputs.name }}"
-              --source-org "${{ inputs.source-org }}"
-              --poll-timeout-secs "${{ inputs.poll-timeout-secs }}"
-              --output "${{ inputs.result-output }}")
-        [[ -n "${{ inputs.description }}" ]] && args+=(--description "${{ inputs.description }}")
-        [[ -n "${{ inputs.content }}" ]] && args+=(--content "${{ inputs.content }}")
-
-        mkdir -p "$(dirname "${{ inputs.result-output }}")"
-        sf-snapshot "${args[@]}"
-
-        jq -r '"snapshot-id=" + .org_snapshot_id' "${{ inputs.result-output }}" >> "$GITHUB_OUTPUT"
-        jq -r '"status=" + .status'               "${{ inputs.result-output }}" >> "$GITHUB_OUTPUT"
+      run: sf-snapshot
