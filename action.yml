@@ -2,7 +2,24 @@ name: 'Busbar — sf-snapshot'
 description: 'Create a Salesforce scratch-org snapshot (OrgSnapshot) via direct API. Auths the DevHub via busbar-auth.'
 author: 'Busbar'
 
+# AUTH (self-mint via OIDC — the DEFAULT, primary path): set `target-instance`
+# to the Busbar-equipped DevHub's instance URL (e.g. busbar-pilot-demo2) and
+# grant `permissions:
+# id-token: write` in the caller job. The binary mints its OWN short-lived
+# Salesforce token IN-PROCESS from the runner's GitHub OIDC id-token, uses it,
+# and revokes + zeroizes it at exit (SalesforceSession::dispose). No Salesforce
+# access token is ever handed to a script, written to GITHUB_ENV, or passed as
+# an action input/output. There is NO org-auth handoff step.
 inputs:
+  target-instance:
+    description: >-
+      PRIMARY OIDC path: instance URL of the Busbar-equipped DevHub to mint a
+      short-lived token against (e.g. busbar-pilot-demo2). Passed to the binary as
+      SF_INSTANCE_URL; with
+      `id-token: write` granted, busbar-auth OIDC-exchanges in-process (no
+      SF_ACCESS_TOKEN handoff).
+    required: false
+    default: ''
   name:
     description: 'Snapshot name (unique within the DevHub).'
     required: true
@@ -25,6 +42,33 @@ inputs:
     description: 'Path to write the snapshot result JSON.'
     required: false
     default: '.busbar/snapshot-result.json'
+  eca-client-id:
+    description: 'Optional OIDC tuning: the busbar ECA consumer key (client_id). Maps to ECA_CLIENT_ID. Has a baked default.'
+    required: false
+    default: ''
+  token-handler:
+    description: 'Optional OIDC tuning: the Apex token-exchange handler dev name. Maps to TOKEN_HANDLER_APEX. Defaults to BBGitHubTokenExchangeHandler.'
+    required: false
+    default: ''
+  oidc-audience:
+    description: 'Optional OIDC tuning: audience to request in the GitHub OIDC token. Maps to OIDC_AUDIENCE. Defaults to the target instance URL.'
+    required: false
+    default: ''
+  sf-instance-url:
+    description: >-
+      OPTIONAL local-dev/advanced override of the DevHub instance URL. When set,
+      takes precedence over `target-instance`. Pair with `sf-access-token` for
+      the binary's local-dev fast path (skips OIDC).
+    required: false
+    default: ''
+  sf-access-token:
+    description: >-
+      OPTIONAL local-dev/advanced override ONLY. A pre-obtained DevHub access
+      token; when set the binary uses it directly and skips OIDC self-minting.
+      Leave EMPTY in CI — the default OIDC path mints a short-lived token
+      in-process so no token is ever handed to this action.
+    required: false
+    default: ''
   version:
     description: 'Release tag of the sf-snapshot binary.'
     required: false
@@ -61,16 +105,22 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Set up sf-snapshot
+    - name: Install the sf-snapshot binary from actions-dist
       uses: busbar-actions/setup@main
       with:
         binary: sf-snapshot
         version: ${{ inputs.version }}
         binary-repo: ${{ inputs.binary-repo }}
 
-    - name: Create snapshot
+    - name: Create the OrgSnapshot "${{ inputs.name }}" from source scratch org ${{ inputs.source-org }} via the DevHub (${{ inputs.sf-instance-url != '' && inputs.sf-instance-url || inputs.target-instance }})
       id: snap
       shell: bash
+      # AUTH (default): self-mint via OIDC — SF_INSTANCE_URL = the Busbar-equipped DevHub
+      # (`target-instance`); caller grants `id-token: write` so the runner injects
+      # ACTIONS_ID_TOKEN_REQUEST_*; the binary mints + revokes its own short-lived
+      # token in-process. We do NOT set SF_ACCESS_TOKEN here (no token handoff,
+      # nothing written to GITHUB_ENV); it is only populated from the optional
+      # `sf-access-token` local-dev override input.
       env:
         INPUT_NAME: ${{ inputs.name }}
         INPUT_SOURCE_ORG: ${{ inputs.source-org }}
@@ -78,11 +128,36 @@ runs:
         INPUT_CONTENT: ${{ inputs.content }}
         INPUT_POLL_TIMEOUT_SECS: ${{ inputs.poll-timeout-secs }}
         INPUT_RESULT_OUTPUT: ${{ inputs.result-output }}
-        SF_ACCESS_TOKEN: ${{ env.SF_ACCESS_TOKEN }}
-        SF_INSTANCE_URL: ${{ env.SF_INSTANCE_URL }}
+        # DevHub instance URL: optional override wins, else `target-instance`.
+        SF_INSTANCE_URL: ${{ inputs.sf-instance-url != '' && inputs.sf-instance-url || inputs.target-instance }}
+        # OPTIONAL local-dev override ONLY. Empty in CI → busbar-auth self-mints.
+        SF_ACCESS_TOKEN: ${{ inputs.sf-access-token }}
+        # OIDC tuning (all optional; baked defaults in busbar-auth).
+        ECA_CLIENT_ID: ${{ inputs.eca-client-id }}
+        TOKEN_HANDLER_APEX: ${{ inputs.token-handler }}
+        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
         BUSBAR_ECA_CLIENT_ID: ${{ env.BUSBAR_ECA_CLIENT_ID }}
         BUSBAR_TOKEN_HANDLER: ${{ env.BUSBAR_TOKEN_HANDLER }}
         BUSBAR_OIDC_AUDIENCE: ${{ env.BUSBAR_OIDC_AUDIENCE }}
+        # GitHub injects these only when the caller job grants id-token: write.
         ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
         ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-      run: sf-snapshot
+      run: |
+        set -euo pipefail
+        echo "▶ TESTING: create OrgSnapshot '${INPUT_NAME}' from source scratch org '${INPUT_SOURCE_ORG}' via the DevHub at '${SF_INSTANCE_URL}' (content='${INPUT_CONTENT}', poll-timeout=${INPUT_POLL_TIMEOUT_SECS}s)"
+        # The binary owns the zero-downtime rotation, polling to Active, OIDC
+        # self-mint, the result JSON, and GITHUB_OUTPUT/summary/annotation. Any
+        # non-zero exit aborts the step.
+        sf-snapshot
+        echo "✓ RESULT: OrgSnapshot=${{ steps.snap.outputs.org_snapshot_id }} name=${{ steps.snap.outputs.snapshot_name }} status=${{ steps.snap.outputs.status }} rotated=${{ steps.snap.outputs.rotated }} expires=${{ steps.snap.outputs.expiration_date }}"
+        echo "  evidence — snapshot result JSON written to '${INPUT_RESULT_OUTPUT}':"
+        ls -la "${INPUT_RESULT_OUTPUT}"
+        echo "  evidence — snapshot result JSON contents:"
+        cat "${INPUT_RESULT_OUTPUT}"
+
+    - name: Upload the OrgSnapshot result JSON as a build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sf-snapshot-${{ inputs.name }}-result
+        path: ${{ inputs.result-output }}
+        if-no-files-found: error
