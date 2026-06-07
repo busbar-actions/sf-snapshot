@@ -105,14 +105,14 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install the sf-snapshot binary from actions-dist
+    - name: Install binary
       uses: busbar-actions/setup@main
       with:
         binary: sf-snapshot
         version: ${{ inputs.version }}
         binary-repo: ${{ inputs.binary-repo }}
 
-    - name: Create the OrgSnapshot "${{ inputs.name }}" from source scratch org ${{ inputs.source-org }} via the DevHub (${{ inputs.sf-instance-url != '' && inputs.sf-instance-url || inputs.target-instance }})
+    - name: Snapshot
       id: snap
       shell: bash
       # AUTH (default): self-mint via OIDC — SF_INSTANCE_URL = the Busbar-equipped DevHub
@@ -144,18 +144,19 @@ runs:
         ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
       run: |
         set -euo pipefail
-        echo "▶ TESTING: create OrgSnapshot '${INPUT_NAME}' from source scratch org '${INPUT_SOURCE_ORG}' via the DevHub at '${SF_INSTANCE_URL}' (content='${INPUT_CONTENT}', poll-timeout=${INPUT_POLL_TIMEOUT_SECS}s)"
+        echo "Creating OrgSnapshot '${INPUT_NAME}' from source scratch org '${INPUT_SOURCE_ORG}' via the DevHub at '${SF_INSTANCE_URL}' (content='${INPUT_CONTENT}', poll-timeout=${INPUT_POLL_TIMEOUT_SECS}s)"
         # The binary owns the zero-downtime rotation, polling to Active, OIDC
         # self-mint, the result JSON, and GITHUB_OUTPUT/summary/annotation. Any
         # non-zero exit aborts the step.
         sf-snapshot
-        echo "✓ RESULT: OrgSnapshot=${{ steps.snap.outputs.org_snapshot_id }} name=${{ steps.snap.outputs.snapshot_name }} status=${{ steps.snap.outputs.status }} rotated=${{ steps.snap.outputs.rotated }} expires=${{ steps.snap.outputs.expiration_date }}"
-        echo "  evidence — snapshot result JSON written to '${INPUT_RESULT_OUTPUT}':"
+        echo "::group::Snapshot result"
+        echo "OrgSnapshot=${{ steps.snap.outputs.org_snapshot_id }} name=${{ steps.snap.outputs.snapshot_name }} status=${{ steps.snap.outputs.status }} rotated=${{ steps.snap.outputs.rotated }} expires=${{ steps.snap.outputs.expiration_date }}"
+        echo "Snapshot result JSON written to '${INPUT_RESULT_OUTPUT}':"
         ls -la "${INPUT_RESULT_OUTPUT}"
-        echo "  evidence — snapshot result JSON contents:"
         cat "${INPUT_RESULT_OUTPUT}"
+        echo "::endgroup::"
 
-    - name: Upload the OrgSnapshot result JSON as a build artifact
+    - name: Upload result
       uses: actions/upload-artifact@v4
       with:
         name: sf-snapshot-${{ inputs.name }}-result
