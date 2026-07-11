@@ -70,7 +70,7 @@ jobs:
 | `poll-timeout-secs` | no | `3600` | Seconds to wait for the snapshot to reach `Active` (can take 30+ min for large orgs). |
 | `result-output` | no | `.busbar/snapshot-result.json` | Path to write the snapshot result JSON. |
 | `eca-client-id` | no | `` | Optional OIDC tuning → `ECA_CLIENT_ID`. Baked default. |
-| `token-handler` | no | `` | Optional OIDC tuning → `TOKEN_HANDLER_APEX`. Defaults to `BBGitHubTokenExchangeHandler`. |
+| `token-handler` | no | `` | Optional OIDC tuning → `TOKEN_HANDLER_APEX`. Defaults to `GitHubTokenExchangeHandler`. |
 | `oidc-audience` | no | `` | Optional OIDC tuning → `OIDC_AUDIENCE`. Defaults to the target instance URL. |
 | `sf-instance-url` | no | `` | **Optional local-dev/advanced override** of the DevHub instance URL; wins over `target-instance`. |
 | `sf-access-token` | no | `` | **Optional local-dev/advanced override only.** A pre-obtained DevHub token; when set the binary skips OIDC self-minting. Leave empty in CI. |

@@ -42,41 +42,14 @@ inputs:
     description: 'Path to write the snapshot result JSON.'
     required: false
     default: '.busbar/snapshot-result.json'
-  eca-client-id:
-    description: 'Optional OIDC tuning: the busbar ECA consumer key (client_id). Maps to ECA_CLIENT_ID. Has a baked default.'
-    required: false
-    default: ''
-  token-handler:
-    description: 'Optional OIDC tuning: the Apex token-exchange handler dev name. Maps to TOKEN_HANDLER_APEX. Defaults to BBGitHubTokenExchangeHandler.'
-    required: false
-    default: ''
-  oidc-audience:
-    description: 'Optional OIDC tuning: audience to request in the GitHub OIDC token. Maps to OIDC_AUDIENCE. Defaults to the target instance URL.'
-    required: false
-    default: ''
-  sf-instance-url:
-    description: >-
-      OPTIONAL local-dev/advanced override of the DevHub instance URL. When set,
-      takes precedence over `target-instance`. Pair with `sf-access-token` for
-      the binary's local-dev fast path (skips OIDC).
-    required: false
-    default: ''
-  sf-access-token:
-    description: >-
-      OPTIONAL local-dev/advanced override ONLY. A pre-obtained DevHub access
-      token; when set the binary uses it directly and skips OIDC self-minting.
-      Leave EMPTY in CI — the default OIDC path mints a short-lived token
-      in-process so no token is ever handed to this action.
-    required: false
-    default: ''
   version:
-    description: 'Release tag of the sf-snapshot binary.'
+    description: 'Release tag of the sf-snapshot binary. Falls back to env.BUSBAR_ACTION_VERSION, then "latest".'
     required: false
-    default: 'latest'
+    default: ''
   binary-repo:
-    description: 'GitHub repo hosting prebuilt binary releases.'
+    description: 'GitHub repo hosting prebuilt binary releases. Falls back to env.BUSBAR_ACTION_REPO, then busbar-actions/actions-dist.'
     required: false
-    default: 'busbar-actions/actions-dist'
+    default: ''
 
 outputs:
   snapshot-id:
@@ -109,8 +82,8 @@ runs:
       uses: busbar-actions/setup@main
       with:
         binary: sf-snapshot
-        version: ${{ inputs.version }}
-        binary-repo: ${{ inputs.binary-repo }}
+        version: ${{ inputs.version || env.BUSBAR_ACTION_VERSION || 'latest' }}
+        binary-repo: ${{ inputs.binary-repo || env.BUSBAR_ACTION_REPO || 'busbar-actions/actions-dist' }}
 
     - name: Snapshot
       id: snap
@@ -129,13 +102,7 @@ runs:
         INPUT_POLL_TIMEOUT_SECS: ${{ inputs.poll-timeout-secs }}
         INPUT_RESULT_OUTPUT: ${{ inputs.result-output }}
         # DevHub instance URL: optional override wins, else `target-instance`.
-        SF_INSTANCE_URL: ${{ inputs.sf-instance-url != '' && inputs.sf-instance-url || inputs.target-instance }}
-        # OPTIONAL local-dev override ONLY. Empty in CI → busbar-auth self-mints.
-        SF_ACCESS_TOKEN: ${{ inputs.sf-access-token }}
-        # OIDC tuning (all optional; baked defaults in busbar-auth).
-        ECA_CLIENT_ID: ${{ inputs.eca-client-id }}
-        TOKEN_HANDLER_APEX: ${{ inputs.token-handler }}
-        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
+        SF_INSTANCE_URL: ${{ inputs.target-instance || env.SF_INSTANCE_URL }}
         BUSBAR_ECA_CLIENT_ID: ${{ env.BUSBAR_ECA_CLIENT_ID }}
         BUSBAR_TOKEN_HANDLER: ${{ env.BUSBAR_TOKEN_HANDLER }}
         BUSBAR_OIDC_AUDIENCE: ${{ env.BUSBAR_OIDC_AUDIENCE }}
